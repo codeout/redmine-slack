@@ -56,6 +56,14 @@ class SlackListener < Redmine::Hook::Listener
 		speak msg, channel, attachment, url
 	end
 
+  def controller_messages_new_after_save(context={})
+    controller_messages_hook context, 'opened'
+  end
+
+  def controller_messages_reply_after_save(context={})
+    controller_messages_hook context, 'replied'
+  end
+
 	def model_changeset_scan_commit_for_issue_ids_pre_issue_update(context={})
 		issue = context[:issue]
 		journal = issue.current_journal
@@ -160,6 +168,25 @@ class SlackListener < Redmine::Hook::Listener
 	end
 
 private
+
+  def controller_messages_hook(context, label)
+    message = context[:message]
+    attachments = context[:params][:attachments] || []
+
+    channel = channel_for_project message.project
+    url = url_for_project message.project
+
+    return unless channel and url and Setting.plugin_redmine_slack[:post_message_updates] == '1'
+
+    msg = "[#{escape message.project}] #{escape message.author.to_s} #{label} <#{object_url message}|#{escape message.subject}>#{mentions message.content}"
+
+    attachment = {}
+    attachment[:text] = escape message.content if message.content
+    attachment[:fields] = attachments.map { |key, detail| attachment_params_to_detail(key, detail) }
+
+    speak msg, channel, attachment, url
+  end
+
 	def escape(msg)
 		msg.to_s.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;")
 	end
@@ -262,6 +289,21 @@ private
 		result[:short] = true if short
 		result
 	end
+
+  def attachment_params_to_detail(prop_key, detail)
+    title = I18n.t :label_attachment
+    short = true
+    attachment = Attachment.find(prop_key) rescue nil
+    value =  if attachment
+               "<#{object_url attachment}|#{escape attachment.filename}>"
+             else
+               "-"
+             end
+
+    result = { :title => title, :value => value }
+    result[:short] = true if short
+    result
+  end
 
 	def mentions text
 		names = extract_usernames text
